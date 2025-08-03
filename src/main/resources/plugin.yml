@@ -1,0 +1,7 @@
+name: YapayZekaKodlayici
+version: 1.0
+main: me.yapayzeka.YapayZekaKodlayici
+api-version: 1.8
+commands:
+  yapayzeka:
+    description: AI ile plugin kodlatır
