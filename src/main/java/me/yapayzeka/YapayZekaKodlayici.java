@@ -14,7 +14,7 @@ import com.google.gson.*;
 public class YapayZekaKodlayici extends JavaPlugin {
 
     // OpenRouter API KEY'inizi buraya yapıştırın
-    private static final String OPENROUTER_API_KEY = "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";
+    private static final String OPENROUTER_API_KEY = "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";
 
     @Override
     public void onEnable(){
