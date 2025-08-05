@@ -25,7 +25,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
         this.apiKey = getConfig().getString("api-key", "null");
         this.prefix = getConfig().getString("prefix", "§7[§bYapayZeka§7]§r ");
 
-        getLogger().info("YapayZekaKodlayici aktif!");
+        getLogger().info("YapaYZekaKodlayici aktif!");
     }
 
     @Override
