@@ -13,11 +13,18 @@ import com.google.gson.*;
 
 public class YapayZekaKodlayici extends JavaPlugin {
 
-    // OpenRouter API KEY'inizi buraya yapıştırın
-    private static final String OPENROUTER_API_KEY = "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";
+    private String apiKey;
+    private String prefix;
 
     @Override
     public void onEnable(){
+        // Config kontrol
+        saveDefaultConfig();
+        reloadConfig();
+
+        this.apiKey = getConfig().getString("api-key", "null");
+        this.prefix = getConfig().getString("prefix", "§7[§bYapayZeka§7]§r ");
+
         getLogger().info("YapayZekaKodlayici aktif!");
     }
 
@@ -25,7 +32,12 @@ public class YapayZekaKodlayici extends JavaPlugin {
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args){
         if(label.equalsIgnoreCase("yapayzeka") && args.length >= 2 && args[0].equalsIgnoreCase("kodla")){
             String prompt = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-            sender.sendMessage("➤ Açıklama AI’ye gönderiliyor: " + prompt);
+            sender.sendMessage(prefix + "Açıklama AI’ye gönderiliyor: " + prompt);
+
+            if (apiKey == null || apiKey.equals("null") || apiKey.length() < 10) {
+                sender.sendMessage(prefix + "§cConfig.yml içindeki 'api-key' ayarını doldurmalısın.");
+                return true;
+            }
 
             try {
                 // API isteği oluştur
@@ -35,7 +47,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
                 JsonObject systemMsg = new JsonObject();
                 systemMsg.addProperty("role", "system");
-                systemMsg.addProperty("content", "You are a Bukkit plugin generator for Minecraft 1.8.8. Provide ONLY Java code and plugin.yml.");
+                systemMsg.addProperty("content", "You are a Bukkit plugin generator for Minecraft 1.8.8. Return only Java code and plugin.yml as code blocks.");
 
                 JsonObject userMsg = new JsonObject();
                 userMsg.addProperty("role", "user");
@@ -51,7 +63,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
                 conn.setDoOutput(true);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Authorization", "Bearer " + OPENROUTER_API_KEY);
+                conn.setRequestProperty("Authorization", "Bearer " + apiKey);
 
                 try(OutputStream os = conn.getOutputStream()){
                     os.write(req.toString().getBytes());
@@ -67,15 +79,35 @@ public class YapayZekaKodlayici extends JavaPlugin {
                     .get("content").getAsString();
                 rd.close();
 
-                // Yanıt içinden Java ve YAML kodu ayıkla
+                // Güvenlik filtresi
+                String[] yasakliIfadeler = {
+                        "Runtime.getRuntime()",
+                        "ProcessBuilder",
+                        "System.exit",
+                        "File.delete",
+                        "Thread.sleep(",
+                        "while(true)",
+                        "for(;;)",
+                        "new URL(",
+                        "new Socket("
+                };
+                for (String ifade : yasakliIfadeler) {
+                    if (aiContent.contains(ifade)) {
+                        sender.sendMessage(prefix + "§cGüvensiz ifade tespit edildi: §e" + ifade);
+                        sender.sendMessage(prefix + "§cİşlem iptal edildi.");
+                        return true;
+                    }
+                }
+
+                // Kod ayıklama
                 String javaKodu = extractBetween(aiContent, "```java", "```");
                 String pluginYml = extractBetween(aiContent, "```yaml", "```");
                 if (javaKodu == null || pluginYml == null) {
-                    sender.sendMessage("§cAI’den uygun kod alınamadı.");
+                    sender.sendMessage(prefix + "§cAI’den uygun kod alınamadı.");
                     return true;
                 }
 
-                // Plugin dizinleri oluştur
+                // Plugin oluşturma
                 String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
                 Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
                 Path src = gen.resolve("src");
@@ -83,11 +115,8 @@ public class YapayZekaKodlayici extends JavaPlugin {
                 Files.createDirectories(src);
                 Files.createDirectories(cls);
 
-                // Java dosyasını yaz
                 Path javaPath = src.resolve("GeneratedPlugin.java");
                 Files.write(javaPath, javaKodu.getBytes());
-
-                // plugin.yml dosyasını yaz
                 Files.write(gen.resolve("plugin.yml"), pluginYml.getBytes());
 
                 // Derleme
@@ -108,11 +137,11 @@ public class YapayZekaKodlayici extends JavaPlugin {
                     jos.closeEntry();
                 }
 
-                sender.sendMessage("§aPlugin oluşturuldu: " + jarOut.getFileName());
-                sender.sendMessage("§7PlugMan ile yüklemek için: /plugman load " + pluginAdi);
-            }
-            catch(Exception e){
-                sender.sendMessage("§cHata: " + e.getMessage());
+                sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
+                sender.sendMessage(prefix + "§7PlugMan ile yüklemek için: /plugman load " + pluginAdi);
+
+            } catch (Exception e) {
+                sender.sendMessage(prefix + "§cHata: " + e.getMessage());
                 e.printStackTrace();
             }
 
