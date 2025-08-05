@@ -1,0 +1,7 @@
+# YapayZekaKodlayici ayarları
+
+# Komut çıktılarında kullanılacak önek (renk, stil ayarlanabilir)
+prefix: "§7[§bYapayZeka§7]§r "
+
+# OpenRouter.io üzerinden aldığınız API key'i buraya yapıştırın
+api-key: "YOUR_API_KEY_HERE"
