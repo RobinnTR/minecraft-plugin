@@ -27,6 +27,46 @@ public class YapayZekaKodlayici extends JavaPlugin {
         getLogger().info("API KEY:" + getConfig().getString("api-key"));
 
         getLogger().info("YapayZekaKodlayici aktif!");
+
+        URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
+HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+conn.setRequestMethod("POST");
+conn.setDoOutput(true);
+conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+// İsteğe bağlı ama önerilen:
+conn.setRequestProperty("HTTP-Referer", "https://your-domain-or-app"); // yoksa kaldırın
+conn.setRequestProperty("X-Title", "Your App Name");
+
+// Gövde: model ve messages zorunlu
+String body = """
+{
+  "model": "openai/gpt-3.5-turbo",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Merhaba"}
+  ],
+  "temperature": 0.7
+}
+""";
+
+try (OutputStream os = conn.getOutputStream()) {
+    byte[] input = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    os.write(input);
+}
+
+int status = conn.getResponseCode();
+
+// Başarı veya hata gövdesini oku
+InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
+try (BufferedReader br = new BufferedReader(new InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
+    StringBuilder resp = new StringBuilder();
+    String line;
+    while ((line = br.readLine()) != null) resp.append(line);
+    System.out.println("Status: " + status);
+    System.out.println("Response: " + resp);
+}
+conn.disconnect();
     }
 
     @Override
