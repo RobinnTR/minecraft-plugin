@@ -37,10 +37,6 @@ conn.setRequestProperty("Authorization", "Bearer " + apiKey);
 
 conn.setRequestProperty("X-Title", "Your App Name");
 
-try (OutputStream os = conn.getOutputStream()) {
-    byte[] input = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    os.write(input);
-}
 
 int status = conn.getResponseCode();
 
