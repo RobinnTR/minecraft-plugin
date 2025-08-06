@@ -1,15 +1,33 @@
 package me.yapayzeka;
 
-import org.bukkit.command.*;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import javax.tools.*;
-import java.io.*;
-import java.net.*;
-import java.nio.file.*;
-import java.util.*;
-import java.util.jar.*;
-import com.google.gson.*;
+import javax.tools.JavaCompiler;
+import javax.tools.StandardJavaFileManager;
+import javax.tools.StandardLocation;
+import javax.tools.ToolProvider;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.Reader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 public class YapayZekaKodlayici extends JavaPlugin {
 
@@ -17,8 +35,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
     private String prefix;
 
     @Override
-    public void onEnable(){
-        // Config kontrol
+    public void onEnable() {
         saveDefaultConfig();
         reloadConfig();
 
@@ -27,62 +44,47 @@ public class YapayZekaKodlayici extends JavaPlugin {
         getLogger().info("API KEY:" + getConfig().getString("api-key"));
 
         getLogger().info("YapayZekaKodlayici aktif!");
-
-        //getServer().getScheduler().runTaskAsynchronously(this, () -> callOpenRouter(apiKey));
     }
 
-    private void callOpenRouter(String apiKey) {
-    HttpURLConnection conn = null;
-    try {
-        URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
-        conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(60000);
+    private String callOpenRouterRaw(String jsonBody) throws Exception {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
 
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-        // İsteğe bağlı:
-        // conn.setRequestProperty("HTTP-Referer", "https://example.com");
-        // conn.setRequestProperty("X-Title", "Minecraft Plugin Test");
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
 
-        // Java 8 uyumlu JSON gövdesi (kaçışlara dikkat)
-        String body =
-            "{"
-          + "\"model\":\"openai/gpt-3.5-turbo\","
-          + "\"messages\":["
-              + "{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},"
-              + "{\"role\":\"user\",\"content\":\"Merhaba! Bana kısaca cevap ver.\"}"
-            + "],"
-          + "\"temperature\":0.7"
-          + "}";
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
+            }
 
-        OutputStream os = conn.getOutputStream();
-        os.write(body.getBytes("UTF-8"));
-        os.flush();
-        os.close();
+            int status = conn.getResponseCode();
+            InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
 
-        int status = conn.getResponseCode();
-        InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-        StringBuilder resp = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) resp.append(line);
-        br.close();
+            StringBuilder resp = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) resp.append(line);
+            }
 
-        getLogger().info("[OpenRouter] HTTP " + status);
-        getLogger().info("[OpenRouter] Response: " + resp.toString());
-    } catch (Exception e) {
-        getLogger().severe("[OpenRouter] Hata: " + e.getMessage());
-    } finally {
-        if (conn != null) conn.disconnect();
+            getLogger().info("[OpenRouter] HTTP " + status);
+            if (status < 200 || status >= 300) {
+                throw new RuntimeException("OpenRouter 4xx/5xx: " + resp.toString());
+            }
+            return resp.toString();
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
-    }
-    
+
     @Override
-    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args){
-        if(label.equalsIgnoreCase("yapayzeka") && args.length >= 2 && args[0].equalsIgnoreCase("kodla")){
+    public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+        if (label.equalsIgnoreCase("yapayzeka") && args.length >= 2 && args[0].equalsIgnoreCase("kodla")) {
             String prompt = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
             sender.sendMessage(prefix + "Açıklama AI’ye gönderiliyor: " + prompt);
 
@@ -91,147 +93,108 @@ public class YapayZekaKodlayici extends JavaPlugin {
                 return true;
             }
 
-            try {
-                // API isteği oluştur
-                JsonObject req = new JsonObject();
-                req.addProperty("model", "deepseek/deepseek-coder:free");
-                JsonArray messages = new JsonArray();
+            getServer().getScheduler().runTaskAsynchronously(this, () -> {
+                try {
+                    JsonObject req = new JsonObject();
+                    req.addProperty("model", "openai/gpt-3.5-turbo");
+                    JsonArray messages = new JsonArray();
 
-                JsonObject systemMsg = new JsonObject();
-                systemMsg.addProperty("role", "system");
-                systemMsg.addProperty("content", "You are a Bukkit plugin generator for Minecraft 1.8.8. Return only Java code and plugin.yml as code blocks.");
+                    JsonObject systemMsg = new JsonObject();
+                    systemMsg.addProperty("role", "system");
+                    systemMsg.addProperty("content", "You are a Bukkit plugin generator for Minecraft 1.8.8. Return only Java code and plugin.yml as code blocks.");
 
-                JsonObject userMsg = new JsonObject();
-                userMsg.addProperty("role", "user");
-                userMsg.addProperty("content", prompt);
+                    JsonObject userMsg = new JsonObject();
+                    userMsg.addProperty("role", "user");
+                    userMsg.addProperty("content", prompt);
 
-                messages.add(systemMsg);
-                messages.add(userMsg);
-                req.add("messages", messages);
+                    messages.add(systemMsg);
+                    messages.add(userMsg);
+                    req.add("messages", messages);
+                    req.addProperty("temperature", 0.7);
 
-                // API isteği gönder
-                HttpURLConnection conn = null;
-    try {
-        URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
-        conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("POST");
-        conn.setDoOutput(true);
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(60000);
+                    String respStr = callOpenRouterRaw(req.toString());
 
-        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-        // İsteğe bağlı:
-        // conn.setRequestProperty("HTTP-Referer", "https://example.com");
-        // conn.setRequestProperty("X-Title", "Minecraft Plugin Test");
+                    JsonObject resp = JsonParser.parseString(respStr).getAsJsonObject();
+                    if (!resp.has("choices")) throw new RuntimeException("Beklenmeyen yanıt: " + respStr);
 
-        // Java 8 uyumlu JSON gövdesi (kaçışlara dikkat)
-        String body =
-            "{"
-          + "\"model\":\"openai/gpt-3.5-turbo\","
-          + "\"messages\":["
-              + "{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},"
-              + "{\"role\":\"user\",\"content\":\"Merhaba! Bana kısaca cevap ver.\"}"
-            + "],"
-          + "\"temperature\":0.7"
-          + "}";
+                    String aiContent = resp
+                            .getAsJsonArray("choices")
+                            .get(0).getAsJsonObject()
+                            .getAsJsonObject("message")
+                            .get("content").getAsString();
 
-        OutputStream os = conn.getOutputStream();
-        os.write(body.getBytes("UTF-8"));
-        os.flush();
-        os.close();
-
-        int status = conn.getResponseCode();
-        InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-        StringBuilder resp = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) resp.append(line);
-        br.close();
-
-        getLogger().info("[OpenRouter] HTTP " + status);
-        getLogger().info("[OpenRouter] Response: " + resp.toString());
-    } catch (Exception e) {
-        getLogger().severe("[OpenRouter] Hata: " + e.getMessage());
-    } finally {
-        if (conn != null) conn.disconnect();
-    }
-
-                // Yanıtı oku
-                Reader rd = new InputStreamReader(conn.getInputStream());
-                JsonObject resp = JsonParser.parseReader(rd).getAsJsonObject();
-                String aiContent = resp
-                    .getAsJsonArray("choices")
-                    .get(0).getAsJsonObject()
-                    .getAsJsonObject("message")
-                    .get("content").getAsString();
-                rd.close();
-
-                // Güvenlik filtresi
-                String[] yasakliIfadeler = {
-                        "Runtime.getRuntime()",
-                        "ProcessBuilder",
-                        "System.exit",
-                        "File.delete",
-                        "Thread.sleep(",
-                        "while(true)",
-                        "for(;;)",
-                        "new URL(",
-                        "new Socket("
-                };
-                for (String ifade : yasakliIfadeler) {
-                    if (aiContent.contains(ifade)) {
-                        sender.sendMessage(prefix + "§cGüvensiz ifade tespit edildi: §e" + ifade);
-                        sender.sendMessage(prefix + "§cİşlem iptal edildi.");
-                        return true;
+                    String[] yasakliIfadeler = new String[]{
+                            "Runtime.getRuntime()",
+                            "ProcessBuilder",
+                            "System.exit",
+                            "File.delete",
+                            "Thread.sleep(",
+                            "while(true)",
+                            "for(;;)",
+                            "new URL(",
+                            "new Socket("
+                    };
+                    for (String ifade : yasakliIfadeler) {
+                        if (aiContent != null && aiContent.contains(ifade)) {
+                            sender.sendMessage(prefix + "§cGüvensiz ifade tespit edildi: §e" + ifade);
+                            sender.sendMessage(prefix + "§cİşlem iptal edildi.");
+                            return;
+                        }
                     }
+
+                    String javaKodu = extractBetween(aiContent, "```java", "```");
+                    String pluginYml = extractBetween(aiContent, "```yaml", "```");
+                    if (javaKodu == null || pluginYml == null) {
+                        sender.sendMessage(prefix + "§cAI’den uygun kod alınamadı.");
+                        return;
+                    }
+
+                    String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
+                    Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
+                    Path src = gen.resolve("src");
+                    Path cls = gen.resolve("classes");
+                    Files.createDirectories(src);
+                    Files.createDirectories(cls);
+
+                    Path javaPath = src.resolve("GeneratedPlugin.java");
+                    try (BufferedWriter bw = Files.newBufferedWriter(javaPath, StandardCharsets.UTF_8)) {
+                        bw.write(javaKodu);
+                    }
+                    Files.write(gen.resolve("plugin.yml"), pluginYml.getBytes(StandardCharsets.UTF_8));
+
+                    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+                    if (compiler == null) {
+                        sender.sendMessage(prefix + "§cSunucuda JDK yok (sadece JRE). Derleme yapılamıyor.");
+                        return;
+                    }
+                    try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, null)) {
+                        fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
+                        boolean ok = compiler.getTask(null, fm, null, null, null, fm.getJavaFileObjects(javaPath.toFile())).call();
+                        if (!ok) {
+                            sender.sendMessage(prefix + "§cDerleme başarısız. Kaynak kodu kontrol edin.");
+                            return;
+                        }
+                    }
+
+                    Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
+                    try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
+                        jos.putNextEntry(new JarEntry("plugin.yml"));
+                        jos.write(pluginYml.getBytes(StandardCharsets.UTF_8));
+                        jos.closeEntry();
+
+                        jos.putNextEntry(new JarEntry("GeneratedPlugin.class"));
+                        jos.write(Files.readAllBytes(cls.resolve("GeneratedPlugin.class")));
+                        jos.closeEntry();
+                    }
+
+                    sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
+                    sender.sendMessage(prefix + "§7PlugMan ile yüklemek için: /plugman load " + pluginAdi);
+
+                } catch (Exception e) {
+                    sender.sendMessage(prefix + "§cHata: " + e.getMessage());
+                    getLogger().warning("Hata: " + e.getMessage());
                 }
-
-                // Kod ayıklama
-                String javaKodu = extractBetween(aiContent, "```java", "```");
-                String pluginYml = extractBetween(aiContent, "```yaml", "```");
-                if (javaKodu == null || pluginYml == null) {
-                    sender.sendMessage(prefix + "§cAI’den uygun kod alınamadı.");
-                    return true;
-                }
-
-                // Plugin oluşturma
-                String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
-                Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
-                Path src = gen.resolve("src");
-                Path cls = gen.resolve("classes");
-                Files.createDirectories(src);
-                Files.createDirectories(cls);
-
-                Path javaPath = src.resolve("GeneratedPlugin.java");
-                Files.write(javaPath, javaKodu.getBytes());
-                Files.write(gen.resolve("plugin.yml"), pluginYml.getBytes());
-
-                // Derleme
-                JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-                try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, null)) {
-                    fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
-                    compiler.getTask(null, fm, null, null, null, fm.getJavaFileObjects(javaPath.toFile())).call();
-                }
-
-                // .jar oluştur
-                Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
-                try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
-                    jos.putNextEntry(new JarEntry("plugin.yml"));
-                    jos.write(pluginYml.getBytes()); jos.closeEntry();
-
-                    jos.putNextEntry(new JarEntry("GeneratedPlugin.class"));
-                    jos.write(Files.readAllBytes(cls.resolve("GeneratedPlugin.class")));
-                    jos.closeEntry();
-                }
-
-                sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
-                sender.sendMessage(prefix + "§7PlugMan ile yüklemek için: /plugman load " + pluginAdi);
-
-            } catch (Exception e) {
-                sender.sendMessage(prefix + "§cHata: " + e.getMessage());
-                e.printStackTrace();
-            }
+            });
 
             return true;
         }
@@ -239,10 +202,11 @@ public class YapayZekaKodlayici extends JavaPlugin {
     }
 
     private String extractBetween(String text, String start, String end) {
+        if (text == null) return null;
         int i = text.indexOf(start);
-        if(i < 0) return null;
+        if (i < 0) return null;
         int j = text.indexOf(end, i + start.length());
-        if(j < 0) return null;
+        if (j < 0) return null;
         return text.substring(i + start.length(), j).trim();
     }
-}
+        }
