@@ -28,7 +28,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
         getLogger().info("YapayZekaKodlayici aktif!");
 
-        getServer().getScheduler().runTaskAsynchronously(this, () -> callOpenRouter(apiKey));
+        //getServer().getScheduler().runTaskAsynchronously(this, () -> callOpenRouter(apiKey));
     }
 
     private void callOpenRouter(String apiKey) {
