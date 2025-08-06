@@ -110,12 +110,17 @@ public class YapayZekaKodlayici extends JavaPlugin {
                 req.add("messages", messages);
 
                 // API isteği gönder
+                HttpURLConnection conn = null;
                 URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setDoOutput(true);
-                conn.setRequestMethod("POST");
-                conn.setRequestProperty("Content-Type", "application/json");
-                conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+
+                conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(60000);
+
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
 
                 try(OutputStream os = conn.getOutputStream()){
                     os.write(req.toString().getBytes());
