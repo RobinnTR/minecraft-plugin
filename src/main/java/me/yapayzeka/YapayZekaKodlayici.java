@@ -34,21 +34,8 @@ conn.setRequestMethod("POST");
 conn.setDoOutput(true);
 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
 conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-// İsteğe bağlı ama önerilen:
-conn.setRequestProperty("HTTP-Referer", "https://your-domain-or-app"); // yoksa kaldırın
-conn.setRequestProperty("X-Title", "Your App Name");
 
-// Gövde: model ve messages zorunlu
-String body = """
-{
-  "model": "openai/gpt-3.5-turbo",
-  "messages": [
-    {"role": "system", "content": "You are a helpful assistant."},
-    {"role": "user", "content": "Merhaba"}
-  ],
-  "temperature": 0.7
-}
-""";
+conn.setRequestProperty("X-Title", "Your App Name");
 
 try (OutputStream os = conn.getOutputStream()) {
     byte[] input = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
