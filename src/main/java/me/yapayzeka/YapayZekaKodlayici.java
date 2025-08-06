@@ -13,7 +13,6 @@ import java.io.BufferedWriter;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.Reader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -21,7 +20,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 
@@ -149,6 +150,16 @@ public class YapayZekaKodlayici extends JavaPlugin {
                         return;
                     }
 
+                    // 1) Sınıf ve paket adını çıkar
+                    ParsedInfo parsed;
+                    try {
+                        parsed = parseClassAndPackage(javaKodu);
+                    } catch (Exception ex) {
+                        sender.sendMessage(prefix + "§cKaynak analiz hatası: " + ex.getMessage());
+                        return;
+                    }
+
+                    // 2) Çalışma dizinleri
                     String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
                     Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
                     Path src = gen.resolve("src");
@@ -156,35 +167,62 @@ public class YapayZekaKodlayici extends JavaPlugin {
                     Files.createDirectories(src);
                     Files.createDirectories(cls);
 
-                    Path javaPath = src.resolve("GeneratedPlugin.java");
+                    // 3) Kaynağı doğru dosyaya yaz (paket yolunu da oluştur)
+                    Path javaPath = parsed.packageName.isEmpty()
+                            ? src.resolve(parsed.className + ".java")
+                            : src.resolve(parsed.pkgPath()).resolve(parsed.className + ".java");
+                    Files.createDirectories(javaPath.getParent());
                     try (BufferedWriter bw = Files.newBufferedWriter(javaPath, StandardCharsets.UTF_8)) {
                         bw.write(javaKodu);
                     }
-                    Files.write(gen.resolve("plugin.yml"), pluginYml.getBytes(StandardCharsets.UTF_8));
 
+                    // 4) plugin.yml içinde main'i güncelle/ekle
+                    String finalPluginYml = buildPluginYmlWithMain(pluginYml, parsed.mainFqn());
+
+                    // 5) Derleme (Java 8 hedefi)
                     JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
                     if (compiler == null) {
                         sender.sendMessage(prefix + "§cSunucuda JDK yok (sadece JRE). Derleme yapılamıyor.");
                         return;
                     }
-                    try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, null)) {
+                    try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
                         fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
-                        boolean ok = compiler.getTask(null, fm, null, null, null, fm.getJavaFileObjects(javaPath.toFile())).call();
+
+                        // Gerekirse classpath eklemek için buraya -classpath verilebilir
+                        List<String> options = new ArrayList<>();
+                        options.add("-Xlint:none");
+                        options.add("-source"); options.add("1.8");
+                        options.add("-target"); options.add("1.8");
+
+                        boolean ok = compiler.getTask(null, fm, null, options, null, fm.getJavaFileObjects(javaPath.toFile())).call();
                         if (!ok) {
                             sender.sendMessage(prefix + "§cDerleme başarısız. Kaynak kodu kontrol edin.");
                             return;
                         }
                     }
 
+                    // 6) JAR oluştur: plugin.yml + tüm .class dosyaları (paket hiyerarşisiyle)
                     Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
                     try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
+                        // plugin.yml
                         jos.putNextEntry(new JarEntry("plugin.yml"));
-                        jos.write(pluginYml.getBytes(StandardCharsets.UTF_8));
+                        jos.write(finalPluginYml.getBytes(StandardCharsets.UTF_8));
                         jos.closeEntry();
 
-                        jos.putNextEntry(new JarEntry("GeneratedPlugin.class"));
-                        jos.write(Files.readAllBytes(cls.resolve("GeneratedPlugin.class")));
-                        jos.closeEntry();
+                        // classes altındaki tüm .class dosyaları
+                        Files.walk(cls).forEach(p -> {
+                            try {
+                                if (Files.isRegularFile(p) && p.toString().endsWith(".class")) {
+                                    Path rel = cls.relativize(p);
+                                    String entryName = rel.toString().replace(java.io.File.separatorChar, '/');
+                                    jos.putNextEntry(new JarEntry(entryName));
+                                    jos.write(Files.readAllBytes(p));
+                                    jos.closeEntry();
+                                }
+                            } catch (Exception ex) {
+                                throw new RuntimeException(ex);
+                            }
+                        });
                     }
 
                     sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
@@ -209,4 +247,56 @@ public class YapayZekaKodlayici extends JavaPlugin {
         if (j < 0) return null;
         return text.substring(i + start.length(), j).trim();
     }
+
+    // === YARDIMCILAR ===
+    private static class ParsedInfo {
+        final String className;
+        final String packageName; // boş olabilir
+        ParsedInfo(String c, String p) { this.className = c; this.packageName = p; }
+        String pkgPath() { return packageName.isEmpty() ? "" : packageName.replace('.', '/'); }
+        String mainFqn() { return packageName.isEmpty() ? className : packageName + "." + className; }
+    }
+
+    private ParsedInfo parseClassAndPackage(String source) {
+        java.util.regex.Matcher mc = java.util.regex.Pattern
+                .compile("public\\s+class\\s+([A-Za-z_][A-Za-z0-9_]*)")
+                .matcher(source);
+        if (!mc.find()) throw new IllegalArgumentException("Public class bulunamadı");
+        String className = mc.group(1);
+
+        java.util.regex.Matcher mp = java.util.regex.Pattern
+                .compile("(?m)^package\\s+([a-zA-Z0-9_.]+);")
+                .matcher(source);
+        String packageName = mp.find() ? mp.group(1) : "";
+
+        // Birden fazla public class varsa durdur
+        java.util.regex.Matcher all = java.util.regex.Pattern
+                .compile("public\\s+class\\s+[A-Za-z_][A-Za-z0-9_]*")
+                .matcher(source);
+        int count = 0;
+        while (all.find()) count++;
+        if (count > 1) throw new IllegalArgumentException("Birden fazla public class bulundu. Tek public class üretin.");
+
+        return new ParsedInfo(className, packageName);
+    }
+
+    private String buildPluginYmlWithMain(String pluginYml, String mainFqn) {
+        String norm = pluginYml.replace("\r\n", "\n");
+        String[] lines = norm.split("\n");
+        boolean hasMain = false;
+        StringBuilder out = new StringBuilder();
+        for (String line : lines) {
+            String t = line.trim();
+            if (t.toLowerCase().startsWith("main:")) {
+                out.append("main: ").append(mainFqn).append("\n");
+                hasMain = true;
+            } else {
+                out.append(line).append("\n");
+            }
         }
+        if (!hasMain) {
+            out.append("main: ").append(mainFqn).append("\n");
+        }
+        return out.toString();
+    }
+}
