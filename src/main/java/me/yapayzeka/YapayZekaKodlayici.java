@@ -27,7 +27,66 @@ public class YapayZekaKodlayici extends JavaPlugin {
         getLogger().info("API KEY:" + getConfig().getString("api-key"));
 
         getLogger().info("YapayZekaKodlayici aktif!");
+
+        getServer().getScheduler().runTaskAsynchronously(this, () -> callOpenRouterOnce(getLogger(), apiKey));
     }
+
+    private void callOpenRouterOnce(Logger log, String apiKey) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
+
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+            // İsteğe bağlı ama önerilen başlıklar:
+            conn.setRequestProperty("HTTP-Referer", "https://your-app-or-domain.example"); // yoksa kaldırın
+            conn.setRequestProperty("X-Title", "Minecraft Plugin Test");
+
+            // Gövde
+            String body = """
+            {
+              "model": "openai/gpt-3.5-turbo",
+              "messages": [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Merhaba! Bana kısaca cevap ver."}
+              ],
+              "temperature": 0.7
+            }
+            """;
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int status = conn.getResponseCode();
+            String response = readStream((status >= 200 && status < 300)
+                    ? conn.getInputStream()
+                    : conn.getErrorStream());
+
+            log.info("[OpenRouter] HTTP " + status);
+            log.info("[OpenRouter] Response: " + response);
+
+        } catch (Exception e) {
+            log.severe("[OpenRouter] Istek sırasında hata: " + e.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private String readStream(InputStream is) throws IOException {
+        if (is == null) return "";
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) sb.append(line);
+            return sb.toString();
+        }
+}
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args){
