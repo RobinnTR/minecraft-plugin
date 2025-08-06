@@ -79,7 +79,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
         if (conn != null) conn.disconnect();
     }
     }
-                                                                     }
+    
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args){
         if(label.equalsIgnoreCase("yapayzeka") && args.length >= 2 && args[0].equalsIgnoreCase("kodla")){
