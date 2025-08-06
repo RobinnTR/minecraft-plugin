@@ -111,9 +111,9 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
                 // API isteği gönder
                 HttpURLConnection conn = null;
-                URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
-
-                conn = (HttpURLConnection) url.openConnection();
+    try {
+        URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
+        conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setConnectTimeout(15000);
@@ -121,10 +121,41 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
         conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        // İsteğe bağlı:
+        // conn.setRequestProperty("HTTP-Referer", "https://example.com");
+        // conn.setRequestProperty("X-Title", "Minecraft Plugin Test");
 
-                try(OutputStream os = conn.getOutputStream()){
-                    os.write(req.toString().getBytes());
-                }
+        // Java 8 uyumlu JSON gövdesi (kaçışlara dikkat)
+        String body =
+            "{"
+          + "\"model\":\"openai/gpt-3.5-turbo\","
+          + "\"messages\":["
+              + "{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},"
+              + "{\"role\":\"user\",\"content\":\"Merhaba! Bana kısaca cevap ver.\"}"
+            + "],"
+          + "\"temperature\":0.7"
+          + "}";
+
+        OutputStream os = conn.getOutputStream();
+        os.write(body.getBytes("UTF-8"));
+        os.flush();
+        os.close();
+
+        int status = conn.getResponseCode();
+        InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
+        BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+        StringBuilder resp = new StringBuilder();
+        String line;
+        while ((line = br.readLine()) != null) resp.append(line);
+        br.close();
+
+        getLogger().info("[OpenRouter] HTTP " + status);
+        getLogger().info("[OpenRouter] Response: " + resp.toString());
+    } catch (Exception e) {
+        getLogger().severe("[OpenRouter] Hata: " + e.getMessage());
+    } finally {
+        if (conn != null) conn.disconnect();
+    }
 
                 // Yanıtı oku
                 Reader rd = new InputStreamReader(conn.getInputStream());
