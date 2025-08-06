@@ -42,7 +42,7 @@ int status = conn.getResponseCode();
 
 // Başarı veya hata gövdesini oku
 InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
-try (BufferedReader br = new BufferedReader(new InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
+try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
     StringBuilder resp = new StringBuilder();
     String line;
     while ((line = br.readLine()) != null) resp.append(line);
