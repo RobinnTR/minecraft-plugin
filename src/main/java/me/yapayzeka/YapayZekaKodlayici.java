@@ -27,22 +27,6 @@ public class YapayZekaKodlayici extends JavaPlugin {
         getLogger().info("API KEY:" + getConfig().getString("api-key"));
 
         getLogger().info("YapayZekaKodlayici aktif!");
-
-        URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
-HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-conn.setRequestMethod("POST");
-conn.setDoOutput(true);
-conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-conn.setRequestProperty("Authorization", "Bearer " + apiKey);
-
-conn.setRequestProperty("X-Title", "Your App Name");
-
-
-int status = conn.getResponseCode();
-
-// Başarı veya hata gövdesini oku
-InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
-conn.disconnect();
     }
 
     @Override
