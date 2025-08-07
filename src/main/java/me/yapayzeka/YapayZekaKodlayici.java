@@ -48,40 +48,45 @@ public class YapayZekaKodlayici extends JavaPlugin {
     }
 
     private String callOpenRouterRaw(String jsonBody) throws Exception {
-        HttpURLConnection conn = null;
-        try {
-            URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(60000);
+    HttpURLConnection conn = null;
+    try {
+        // Modeli zorunlu olarak gpt-4o-mini yap
+        JSONObject json = new JSONObject(jsonBody);
+        json.put("model", "openrouter/gpt-4o-mini");
+        String forcedJsonBody = json.toString();
 
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-            conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
+        conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(15000);
+        conn.setReadTimeout(60000);
 
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
-            }
+        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
 
-            int status = conn.getResponseCode();
-            InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
-
-            StringBuilder resp = new StringBuilder();
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = br.readLine()) != null) resp.append(line);
-            }
-
-            getLogger().info("[OpenRouter] HTTP " + status);
-            if (status < 200 || status >= 300) {
-                throw new RuntimeException("OpenRouter 4xx/5xx: " + resp.toString());
-            }
-            return resp.toString();
-        } finally {
-            if (conn != null) conn.disconnect();
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(forcedJsonBody.getBytes(StandardCharsets.UTF_8));
         }
+
+        int status = conn.getResponseCode();
+        InputStream is = (status >= 200 && status < 300) ? conn.getInputStream() : conn.getErrorStream();
+
+        StringBuilder resp = new StringBuilder();
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = br.readLine()) != null) resp.append(line);
+        }
+
+        getLogger().info("[OpenRouter] HTTP " + status);
+        if (status < 200 || status >= 300) {
+            throw new RuntimeException("OpenRouter 4xx/5xx: " + resp.toString());
+        }
+        return resp.toString();
+    } finally {
+        if (conn != null) conn.disconnect();
     }
+}
 
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
