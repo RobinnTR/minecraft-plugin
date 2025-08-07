@@ -94,7 +94,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
                 public void run() {
                     boolean success = false;
                     int tryCount = 0;
-                    while (!success && tryCount < 3) {
+                    while (!success && tryCount < 500) {
                         tryCount++;
                         try {
                             JsonObject req = new JsonObject();
