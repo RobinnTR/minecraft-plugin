@@ -44,7 +44,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
         HttpURLConnection conn = null;
         try {
             JSONObject json = new JSONObject(jsonBody);
-            json.put("model", "z-ai/glm-4.5-air:free");
+            json.put("model", "openai/gpt-oss-20b:free");
             String forcedJsonBody = json.toString();
 
             URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
