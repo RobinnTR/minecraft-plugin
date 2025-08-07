@@ -47,6 +47,11 @@
     <artifactId>json</artifactId>
     <version>20240303</version>
 </dependency>
+             <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-lang3</artifactId>
+        <version>3.12.0</version> <!-- Java 8 ile uyumlu -->
+    </dependency>
            <dependency>
         <groupId>com.google.code.gson</groupId>
         <artifactId>gson</artifactId>
