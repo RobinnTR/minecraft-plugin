@@ -50,7 +50,10 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
             getServer().getScheduler().runTaskAsynchronously(this, new Runnable() {
                 public void run() {
-                    while (true) {
+                    boolean success = false;
+                    int tryCount = 0;
+                    while (!success && tryCount < 3) {
+                        tryCount++;
                         try {
                             JsonObject req = new JsonObject();
                             req.addProperty("model", "openai/gpt-3.5-turbo");
@@ -76,7 +79,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
                             String pluginYml = extractBetween(aiResponse, "```yaml", "```");
 
                             if (javaKodu == null || pluginYml == null) {
-                                sender.sendMessage(prefix + "§eAI’den geçerli kod alınamadı. Tekrar deneniyor...");
+                                sender.sendMessage(prefix + "§cAI’den geçerli kod alınamadı. Tekrar deneniyor...");
                                 continue;
                             }
 
@@ -85,10 +88,8 @@ public class YapayZekaKodlayici extends JavaPlugin {
                             Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
                             Path src = gen.resolve("src");
                             Path cls = gen.resolve("classes");
-                            Path res = gen.resolve("resources");
                             Files.createDirectories(src);
                             Files.createDirectories(cls);
-                            Files.createDirectories(res);
 
                             Path javaPath = parsed.packageName.isEmpty()
                                     ? src.resolve(parsed.className + ".java")
@@ -96,7 +97,8 @@ public class YapayZekaKodlayici extends JavaPlugin {
                             Files.createDirectories(javaPath.getParent());
                             Files.write(javaPath, javaKodu.getBytes(StandardCharsets.UTF_8));
 
-                            Files.write(res.resolve("plugin.yml"), buildPluginYmlWithMain(pluginYml, parsed.mainFqn()).getBytes(StandardCharsets.UTF_8));
+                            String finalPluginYml = buildPluginYmlWithMain(pluginYml, parsed.mainFqn());
+                            Files.write(gen.resolve("plugin.yml"), finalPluginYml.getBytes(StandardCharsets.UTF_8));
 
                             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
                             if (compiler == null) {
@@ -116,17 +118,9 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
                             Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
                             try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
-                                Files.walk(res).filter(Files::isRegularFile).forEach(p -> {
-                                    try {
-                                        Path rel = res.relativize(p);
-                                        String entryName = rel.toString().replace(File.separatorChar, '/');
-                                        jos.putNextEntry(new JarEntry(entryName));
-                                        jos.write(Files.readAllBytes(p));
-                                        jos.closeEntry();
-                                    } catch (IOException e) {
-                                        throw new RuntimeException(e);
-                                    }
-                                });
+                                jos.putNextEntry(new JarEntry("plugin.yml"));
+                                jos.write(finalPluginYml.getBytes(StandardCharsets.UTF_8));
+                                jos.closeEntry();
 
                                 Files.walk(cls).filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".class"))
                                         .forEach(p -> {
@@ -143,8 +137,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
                             }
 
                             sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
-                            break;
-
+                            success = true;
                         } catch (Exception e) {
                             sender.sendMessage(prefix + "§cİşlem sırasında hata oluştu. AI’ye tekrar soruluyor...");
                         }
