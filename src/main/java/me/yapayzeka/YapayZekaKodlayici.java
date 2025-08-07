@@ -1,5 +1,7 @@
 package me.yapayzeka;
 
+import org.json.JSONObject;
+
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -50,9 +52,9 @@ public class YapayZekaKodlayici extends JavaPlugin {
     private String callOpenRouterRaw(String jsonBody) throws Exception {
     HttpURLConnection conn = null;
     try {
-        // Modeli zorunlu olarak gpt-4o-mini yap
+        // JSON gövdesini parse et, modeli zorla
         JSONObject json = new JSONObject(jsonBody);
-        json.put("model", "openrouter/gpt-4o-mini");
+        json.put("model", "openrouter/gpt-4o-mini"); // model sabitlendi
         String forcedJsonBody = json.toString();
 
         URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
@@ -66,7 +68,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
         conn.setRequestProperty("Authorization", "Bearer " + apiKey);
 
         try (OutputStream os = conn.getOutputStream()) {
-            os.write(forcedJsonBody.getBytes(StandardCharsets.UTF_8));
+            os.write(forcedJsonBody.getBytes(StandardCharsets.UTF_8)); // model zorlanmış JSON gönderiliyor
         }
 
         int status = conn.getResponseCode();
