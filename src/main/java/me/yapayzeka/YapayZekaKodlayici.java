@@ -54,7 +54,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
     try {
         // JSON gövdesini parse et, modeli zorla
         JSONObject json = new JSONObject(jsonBody);
-        json.put("model", "openrouter/gpt-4o-mini"); // model sabitlendi
+        json.put("model", "openai/gpt-oss-20b:free"); // model sabitlendi
         String forcedJsonBody = json.toString();
 
         URL url = new URL("https://openrouter.ai/api/v1/chat/completions");
