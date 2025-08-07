@@ -17,6 +17,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -80,7 +81,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
         if (label.equalsIgnoreCase("yapayzeka") && args.length >= 2 && args[0].equalsIgnoreCase("kodla")) {
-            String prompt = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
+            final String prompt = org.apache.commons.lang.StringUtils.join(Arrays.copyOfRange(args, 1, args.length), " ");
             sender.sendMessage(prefix + "Açıklama AI’ye gönderiliyor: " + prompt);
 
             if (apiKey == null || apiKey.equals("null") || apiKey.length() < 10) {
@@ -88,115 +89,117 @@ public class YapayZekaKodlayici extends JavaPlugin {
                 return true;
             }
 
-            getServer().getScheduler().runTaskAsynchronously(this, () -> {
-                try {
-                    JsonObject req = new JsonObject();
-                    req.addProperty("model", "openai/gpt-3.5-turbo");
-                    JsonArray messages = new JsonArray();
+            getServer().getScheduler().runTaskAsynchronously(this, new Runnable() {
+                public void run() {
+                    boolean success = false;
+                    int tryCount = 0;
+                    while (!success && tryCount < 3) {
+                        tryCount++;
+                        try {
+                            JsonObject req = new JsonObject();
+                            req.addProperty("model", "openai/gpt-3.5-turbo");
+                            JsonArray messages = new JsonArray();
 
-                    JsonObject systemMsg = new JsonObject();
-                    systemMsg.addProperty("role", "system");
-                    systemMsg.addProperty("content", "You are a Bukkit plugin generator for Minecraft 1.8.8. Return only Java code and plugin.yml as code blocks.");
+                            JsonObject systemMsg = new JsonObject();
+                            systemMsg.addProperty("role", "system");
+                            systemMsg.addProperty("content", "You are a Bukkit plugin generator for Minecraft 1.8.8. Return only Java code and plugin.yml as code blocks.");
 
-                    JsonObject userMsg = new JsonObject();
-                    userMsg.addProperty("role", "user");
-                    userMsg.addProperty("content", prompt);
+                            JsonObject userMsg = new JsonObject();
+                            userMsg.addProperty("role", "user");
+                            userMsg.addProperty("content", prompt);
 
-                    messages.add(systemMsg);
-                    messages.add(userMsg);
-                    req.add("messages", messages);
-                    req.addProperty("temperature", 0.7);
+                            messages.add(systemMsg);
+                            messages.add(userMsg);
+                            req.add("messages", messages);
+                            req.addProperty("temperature", 0.7);
 
-                    String respStr = callOpenRouterRaw(req.toString());
-                    JsonObject resp = JsonParser.parseString(respStr).getAsJsonObject();
-                    if (!resp.has("choices")) throw new RuntimeException("Beklenmeyen yanıt: " + respStr);
+                            String respStr = callOpenRouterRaw(req.toString());
+                            JsonObject resp = JsonParser.parseString(respStr).getAsJsonObject();
 
-                    String aiContent = resp.getAsJsonArray("choices").get(0).getAsJsonObject().getAsJsonObject("message").get("content").getAsString();
+                            if (!resp.has("choices")) throw new RuntimeException("Beklenmeyen yanıt: " + respStr);
 
-                    String[] yasakliIfadeler = new String[]{"Runtime.getRuntime()", "ProcessBuilder", "System.exit", "File.delete", "Thread.sleep(", "while(true)", "for(;;)", "new URL(", "new Socket("};
-                    for (String ifade : yasakliIfadeler) {
-                        if (aiContent != null && aiContent.contains(ifade)) {
-                            sender.sendMessage(prefix + "§cGüvensiz ifade tespit edildi: §e" + ifade);
-                            sender.sendMessage(prefix + "§cİşlem iptal edildi.");
-                            return;
-                        }
-                    }
+                            String aiContent = resp.getAsJsonArray("choices").get(0).getAsJsonObject()
+                                    .getAsJsonObject("message").get("content").getAsString();
 
-                    String javaKodu = extractBetween(aiContent, "```java", "```");
-                    String pluginYml = extractBetween(aiContent, "```yaml", "```");
-                    if (javaKodu == null || pluginYml == null) {
-                        sender.sendMessage(prefix + "§cAI’den uygun kod alınamadı.");
-                        return;
-                    }
-
-                    ParsedInfo parsed;
-                    try {
-                        parsed = parseClassAndPackage(javaKodu);
-                    } catch (Exception ex) {
-                        sender.sendMessage(prefix + "§cKaynak analiz hatası: " + ex.getMessage());
-                        getLogger().warning("İstenilen eklenti yapay zekanın hatası sebebiyle kodlanamadı. Yapay zekaya parse hatası bildirildi ve sorunun giderilmesi için uğraşıyor.");
-                        return;
-                    }
-
-                    String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
-                    Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
-                    Path src = gen.resolve("src");
-                    Path cls = gen.resolve("classes");
-                    Files.createDirectories(src);
-                    Files.createDirectories(cls);
-
-                    Path javaPath = parsed.packageName.isEmpty() ? src.resolve(parsed.className + ".java") : src.resolve(parsed.pkgPath()).resolve(parsed.className + ".java");
-                    Files.createDirectories(javaPath.getParent());
-                    try (BufferedWriter bw = Files.newBufferedWriter(javaPath, StandardCharsets.UTF_8)) {
-                        bw.write(javaKodu);
-                    }
-
-                    String finalPluginYml = buildPluginYmlWithMain(pluginYml, parsed.mainFqn());
-
-                    JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-                    if (compiler == null) {
-                        sender.sendMessage(prefix + "§cSunucuda JDK yok (sadece JRE). Derleme yapılamıyor.");
-                        return;
-                    }
-                    try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
-                        fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
-                        List<String> options = Arrays.asList("-Xlint:none", "-source", "1.8", "-target", "1.8");
-
-                        boolean ok = compiler.getTask(null, fm, null, options, null, fm.getJavaFileObjects(javaPath.toFile())).call();
-                        if (!ok) {
-                            sender.sendMessage(prefix + "§cDerleme başarısız. Kaynak kodu kontrol edin.");
-                            getLogger().warning("İstenilen eklenti yapay zekanın hatası sebebiyle kodlanamadı. Yapay zekaya " + parsed.className + " sınıfındaki derleme hatası bildirildi ve sorunun giderilmesi için uğraşıyor.");
-                            return;
-                        }
-                    }
-
-                    Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
-                    try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
-                        jos.putNextEntry(new JarEntry("plugin.yml"));
-                        jos.write(finalPluginYml.getBytes(StandardCharsets.UTF_8));
-                        jos.closeEntry();
-
-                        Files.walk(cls).forEach(p -> {
-                            try {
-                                if (Files.isRegularFile(p) && p.toString().endsWith(".class")) {
-                                    Path rel = cls.relativize(p);
-                                    String entryName = rel.toString().replace(File.separatorChar, '/');
-                                    jos.putNextEntry(new JarEntry(entryName));
-                                    jos.write(Files.readAllBytes(p));
-                                    jos.closeEntry();
+                            String[] yasakliIfadeler = new String[]{"Runtime.getRuntime()", "ProcessBuilder", "System.exit", "File.delete", "Thread.sleep(", "while(true)", "for(;;)", "new URL(", "new Socket("};
+                            for (int i = 0; i < yasakliIfadeler.length; i++) {
+                                if (aiContent != null && aiContent.contains(yasakliIfadeler[i])) {
+                                    sender.sendMessage(prefix + "§cGüvensiz ifade tespit edildi: §e" + yasakliIfadeler[i]);
+                                    sender.sendMessage(prefix + "§cİşlem iptal edildi.");
+                                    return;
                                 }
-                            } catch (Exception ex) {
-                                throw new RuntimeException(ex);
                             }
-                        });
+
+                            String javaKodu = extractBetween(aiContent, "```java", "```");
+                            String pluginYml = extractBetween(aiContent, "```yaml", "```");
+
+                            if (javaKodu == null || pluginYml == null) {
+                                sender.sendMessage(prefix + "§cAI’den uygun kod alınamadı. Yapay zekaya eksik çıktı verdiği bildirilecek.");
+                                getLogger().warning("İstenilen eklenti yapay zekanın hatası sebebiyle kodlanamadı. Yapay zekaya kod eksikliği bildirildi ve sorun giderilmeye çalışılıyor.");
+                                continue;
+                            }
+
+                            ParsedInfo parsed = parseClassAndPackage(javaKodu);
+
+                            String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
+                            Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
+                            Path src = gen.resolve("src");
+                            Path cls = gen.resolve("classes");
+                            Files.createDirectories(src);
+                            Files.createDirectories(cls);
+
+                            Path javaPath = parsed.packageName.isEmpty()
+                                    ? src.resolve(parsed.className + ".java")
+                                    : src.resolve(parsed.pkgPath()).resolve(parsed.className + ".java");
+                            Files.createDirectories(javaPath.getParent());
+                            Files.write(javaPath, javaKodu.getBytes(StandardCharsets.UTF_8));
+
+                            String finalPluginYml = buildPluginYmlWithMain(pluginYml, parsed.mainFqn());
+
+                            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+                            if (compiler == null) {
+                                sender.sendMessage(prefix + "§cSunucuda JDK yok. Derleme yapılamıyor.");
+                                return;
+                            }
+                            try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
+                                fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
+                                List<String> options = Arrays.asList("-Xlint:none", "-source", "1.8", "-target", "1.8");
+                                boolean ok = compiler.getTask(null, fm, null, options, null, fm.getJavaFileObjects(javaPath.toFile())).call();
+                                if (!ok) {
+                                    sender.sendMessage(prefix + "§cDerleme hatası oluştu. Yapay zekaya bildiriliyor...");
+                                    getLogger().warning("İstenilen eklenti yapay zekanın hatası sebebiyle kodlanamadı. Yapay zekaya derleme hatası bildirildi ve çözüm aranıyor.");
+                                    continue;
+                                }
+                            }
+
+                            Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
+                            try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
+                                jos.putNextEntry(new JarEntry("plugin.yml"));
+                                jos.write(finalPluginYml.getBytes(StandardCharsets.UTF_8));
+                                jos.closeEntry();
+
+                                Files.walk(cls).filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".class"))
+                                        .forEach(p -> {
+                                            try {
+                                                Path rel = cls.relativize(p);
+                                                String entryName = rel.toString().replace(File.separatorChar, '/');
+                                                jos.putNextEntry(new JarEntry(entryName));
+                                                jos.write(Files.readAllBytes(p));
+                                                jos.closeEntry();
+                                            } catch (IOException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        });
+                            }
+
+                            sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
+                            sender.sendMessage(prefix + "§7PlugMan ile yüklemek için: /plugman load " + pluginAdi);
+                            success = true;
+                        } catch (Exception e) {
+                            sender.sendMessage(prefix + "§cİşlem sırasında hata oluştu. Yapay zekaya bildiriliyor...");
+                            getLogger().warning("İstenilen eklenti yapay zekanın hatası sebebiyle kodlanamadı. Hata bildiriliyor: " + e.getMessage());
+                        }
                     }
-
-                    sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
-                    sender.sendMessage(prefix + "§7PlugMan ile yüklemek için: /plugman load " + pluginAdi);
-
-                } catch (Exception e) {
-                    sender.sendMessage(prefix + "§cHata: " + e.getMessage());
-                    getLogger().warning("İstenilen eklenti yapay zekanın hatası sebebiyle kodlanamadı. Hata: " + e.getMessage());
                 }
             });
             return true;
@@ -216,20 +219,27 @@ public class YapayZekaKodlayici extends JavaPlugin {
     private static class ParsedInfo {
         final String className;
         final String packageName;
-        ParsedInfo(String c, String p) { this.className = c; this.packageName = p; }
-        String pkgPath() { return packageName.isEmpty() ? "" : packageName.replace('.', '/'); }
-        String mainFqn() { return packageName.isEmpty() ? className : packageName + "." + className; }
+        ParsedInfo(String c, String p) {
+            this.className = c;
+            this.packageName = p;
+        }
+        String pkgPath() {
+            return packageName.isEmpty() ? "" : packageName.replace('.', '/');
+        }
+        String mainFqn() {
+            return packageName.isEmpty() ? className : packageName + "." + className;
+        }
     }
 
     private ParsedInfo parseClassAndPackage(String source) {
-        Matcher mc = Pattern.compile("public\\s+class\\s+([A-Za-z_][A-Za-z0-9_]*)").matcher(source);
+        java.util.regex.Matcher mc = java.util.regex.Pattern.compile("public\\s+class\\s+([A-Za-z_][A-Za-z0-9_]*)").matcher(source);
         if (!mc.find()) throw new IllegalArgumentException("Public class bulunamadı");
         String className = mc.group(1);
 
-        Matcher mp = Pattern.compile("(?m)^package\\s+([a-zA-Z0-9_.]+);").matcher(source);
+        java.util.regex.Matcher mp = java.util.regex.Pattern.compile("(?m)^package\\s+([a-zA-Z0-9_.]+);").matcher(source);
         String packageName = mp.find() ? mp.group(1) : "";
 
-        Matcher all = Pattern.compile("public\\s+class\\s+[A-Za-z_][A-Za-z0-9_]*").matcher(source);
+        java.util.regex.Matcher all = java.util.regex.Pattern.compile("public\\s+class\\s+[A-Za-z_][A-Za-z0-9_]*").matcher(source);
         int count = 0;
         while (all.find()) count++;
         if (count > 1) throw new IllegalArgumentException("Birden fazla public class bulundu. Tek public class üretin.");
@@ -242,13 +252,13 @@ public class YapayZekaKodlayici extends JavaPlugin {
         String[] lines = norm.split("\n");
         boolean hasMain = false;
         StringBuilder out = new StringBuilder();
-        for (String line : lines) {
-            String t = line.trim();
+        for (int i = 0; i < lines.length; i++) {
+            String t = lines[i].trim();
             if (t.toLowerCase().startsWith("main:")) {
                 out.append("main: ").append(mainFqn).append("\n");
                 hasMain = true;
             } else {
-                out.append(line).append("\n");
+                out.append(lines[i]).append("\n");
             }
         }
         if (!hasMain) {
