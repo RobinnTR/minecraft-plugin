@@ -50,107 +50,104 @@ public class YapayZekaKodlayici extends JavaPlugin {
 
             getServer().getScheduler().runTaskAsynchronously(this, new Runnable() {
                 public void run() {
-                    try {
-                        JsonObject req = new JsonObject();
-                        req.addProperty("model", "openai/gpt-3.5-turbo");
+                    while (true) {
+                        try {
+                            JsonObject req = new JsonObject();
+                            req.addProperty("model", "openai/gpt-3.5-turbo");
 
-                        JsonArray messages = new JsonArray();
+                            JsonArray messages = new JsonArray();
 
-                        JsonObject systemMsg = new JsonObject();
-                        systemMsg.addProperty("role", "system");
-                        systemMsg.addProperty("content", "You are a Bukkit plugin generator strictly for Minecraft version 1.8.8 using only materials, classes, and methods available in Spigot 1.8.8. All generated code must be fully compatible with Java 8 and must not reference any API, method, or class introduced after Spigot 1.8.8. Return Java code, plugin.yml, and all resource/config files as separate code blocks, marked with filenames such as ```yaml plugin.yml``` or ```yaml config.yml```.");
+                            JsonObject systemMsg = new JsonObject();
+                            systemMsg.addProperty("role", "system");
+                            systemMsg.addProperty("content", "You are a Bukkit plugin generator strictly for Minecraft version 1.8.8 using only materials, classes, and methods available in Spigot 1.8.8. All generated code must be fully compatible with Java 8 and must not reference any API, method, or class introduced after Spigot 1.8.8. Return only Java code and plugin.yml as code blocks.");
 
-                        JsonObject userMsg = new JsonObject();
-                        userMsg.addProperty("role", "user");
-                        userMsg.addProperty("content", prompt);
+                            JsonObject userMsg = new JsonObject();
+                            userMsg.addProperty("role", "user");
+                            userMsg.addProperty("content", prompt);
 
-                        messages.add(systemMsg);
-                        messages.add(userMsg);
-                        req.add("messages", messages);
-                        req.addProperty("temperature", 0.5);
+                            messages.add(systemMsg);
+                            messages.add(userMsg);
+                            req.add("messages", messages);
+                            req.addProperty("temperature", 0.5);
 
-                        String aiResponse = callAPI(req.toString());
+                            String aiResponse = callAPI(req.toString());
 
-                        Map<String, String> resources = extractLabeledCodeBlocks(aiResponse);
-                        String javaKodu = resources.get("java");
-                        String pluginYml = resources.get("plugin.yml");
+                            String javaKodu = extractBetween(aiResponse, "```java", "```");
+                            String pluginYml = extractBetween(aiResponse, "```yaml", "```");
 
-                        if (javaKodu == null || pluginYml == null) {
-                            sender.sendMessage(prefix + "§cAI’den geçerli kod alınamadı.");
-                            return;
-                        }
-
-                        ParsedInfo parsed = parseClassAndPackage(javaKodu);
-                        String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
-                        Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
-                        Path src = gen.resolve("src");
-                        Path cls = gen.resolve("classes");
-                        Path res = gen.resolve("resources");
-                        Files.createDirectories(src);
-                        Files.createDirectories(cls);
-                        Files.createDirectories(res);
-
-                        Path javaPath = parsed.packageName.isEmpty()
-                                ? src.resolve(parsed.className + ".java")
-                                : src.resolve(parsed.pkgPath()).resolve(parsed.className + ".java");
-                        Files.createDirectories(javaPath.getParent());
-                        Files.write(javaPath, javaKodu.getBytes(StandardCharsets.UTF_8));
-
-                        Files.write(res.resolve("plugin.yml"), buildPluginYmlWithMain(pluginYml, parsed.mainFqn()).getBytes(StandardCharsets.UTF_8));
-
-                        for (Map.Entry<String, String> entry : resources.entrySet()) {
-                            if (!entry.getKey().equals("java") && !entry.getKey().equals("plugin.yml")) {
-                                Files.write(res.resolve(entry.getKey()), entry.getValue().getBytes(StandardCharsets.UTF_8));
+                            if (javaKodu == null || pluginYml == null) {
+                                sender.sendMessage(prefix + "§eAI’den geçerli kod alınamadı. Tekrar deneniyor...");
+                                continue;
                             }
-                        }
 
-                        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-                        if (compiler == null) {
-                            sender.sendMessage(prefix + "§cSunucuda JDK yok. Derleme yapılamıyor.");
-                            return;
-                        }
+                            ParsedInfo parsed = parseClassAndPackage(javaKodu);
+                            String pluginAdi = "AIPlugin_" + System.currentTimeMillis();
+                            Path gen = getDataFolder().toPath().resolve("gen").resolve(pluginAdi);
+                            Path src = gen.resolve("src");
+                            Path cls = gen.resolve("classes");
+                            Path res = gen.resolve("resources");
+                            Files.createDirectories(src);
+                            Files.createDirectories(cls);
+                            Files.createDirectories(res);
 
-                        try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
-                            fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
-                            List<String> options = Arrays.asList("-Xlint:none", "-source", "1.8", "-target", "1.8");
-                            boolean ok = compiler.getTask(null, fm, null, options, null, fm.getJavaFileObjects(javaPath.toFile())).call();
-                            if (!ok) {
-                                sender.sendMessage(prefix + "§cKod derlenemedi. Lütfen açıklamanı sadeleştir.");
+                            Path javaPath = parsed.packageName.isEmpty()
+                                    ? src.resolve(parsed.className + ".java")
+                                    : src.resolve(parsed.pkgPath()).resolve(parsed.className + ".java");
+                            Files.createDirectories(javaPath.getParent());
+                            Files.write(javaPath, javaKodu.getBytes(StandardCharsets.UTF_8));
+
+                            Files.write(res.resolve("plugin.yml"), buildPluginYmlWithMain(pluginYml, parsed.mainFqn()).getBytes(StandardCharsets.UTF_8));
+
+                            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+                            if (compiler == null) {
+                                sender.sendMessage(prefix + "§cSunucuda JDK yok. Derleme yapılamıyor.");
                                 return;
                             }
-                        }
 
-                        Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
-                        try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
-                            Files.walk(res).filter(Files::isRegularFile).forEach(p -> {
-                                try {
-                                    Path rel = res.relativize(p);
-                                    String entryName = rel.toString().replace(File.separatorChar, '/');
-                                    jos.putNextEntry(new JarEntry(entryName));
-                                    jos.write(Files.readAllBytes(p));
-                                    jos.closeEntry();
-                                } catch (IOException e) {
-                                    throw new RuntimeException(e);
+                            try (StandardJavaFileManager fm = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
+                                fm.setLocation(StandardLocation.CLASS_OUTPUT, Collections.singletonList(cls.toFile()));
+                                List<String> options = Arrays.asList("-Xlint:none", "-source", "1.8", "-target", "1.8");
+                                boolean ok = compiler.getTask(null, fm, null, options, null, fm.getJavaFileObjects(javaPath.toFile())).call();
+                                if (!ok) {
+                                    sender.sendMessage(prefix + "§cKod derlenemedi. AI’ye tekrar soruluyor...");
+                                    continue;
                                 }
-                            });
+                            }
 
-                            Files.walk(cls).filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".class"))
-                                    .forEach(p -> {
-                                        try {
-                                            Path rel = cls.relativize(p);
-                                            String entryName = rel.toString().replace(File.separatorChar, '/');
-                                            jos.putNextEntry(new JarEntry(entryName));
-                                            jos.write(Files.readAllBytes(p));
-                                            jos.closeEntry();
-                                        } catch (IOException e) {
-                                            throw new RuntimeException(e);
-                                        }
-                                    });
+                            Path jarOut = Paths.get("plugins", pluginAdi + ".jar");
+                            try (JarOutputStream jos = new JarOutputStream(Files.newOutputStream(jarOut))) {
+                                Files.walk(res).filter(Files::isRegularFile).forEach(p -> {
+                                    try {
+                                        Path rel = res.relativize(p);
+                                        String entryName = rel.toString().replace(File.separatorChar, '/');
+                                        jos.putNextEntry(new JarEntry(entryName));
+                                        jos.write(Files.readAllBytes(p));
+                                        jos.closeEntry();
+                                    } catch (IOException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                });
+
+                                Files.walk(cls).filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".class"))
+                                        .forEach(p -> {
+                                            try {
+                                                Path rel = cls.relativize(p);
+                                                String entryName = rel.toString().replace(File.separatorChar, '/');
+                                                jos.putNextEntry(new JarEntry(entryName));
+                                                jos.write(Files.readAllBytes(p));
+                                                jos.closeEntry();
+                                            } catch (IOException e) {
+                                                throw new RuntimeException(e);
+                                            }
+                                        });
+                            }
+
+                            sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
+                            break;
+
+                        } catch (Exception e) {
+                            sender.sendMessage(prefix + "§cİşlem sırasında hata oluştu. AI’ye tekrar soruluyor...");
                         }
-
-                        sender.sendMessage(prefix + "§aPlugin oluşturuldu: §e" + jarOut.getFileName());
-                    } catch (Exception e) {
-                        sender.sendMessage(prefix + "§cİşlem sırasında hata oluştu: " + e.getMessage());
                     }
                 }
             });
@@ -182,20 +179,13 @@ public class YapayZekaKodlayici extends JavaPlugin {
         return resp.toString();
     }
 
-    private Map<String, String> extractLabeledCodeBlocks(String text) {
-        Map<String, String> result = new HashMap<>();
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("```(\\w+)(?: ([^\\n]+))?\\n(.*?)```", java.util.regex.Pattern.DOTALL).matcher(text);
-        while (matcher.find()) {
-            String type = matcher.group(1);
-            String name = matcher.group(2);
-            String content = matcher.group(3).trim();
-            if (type.equals("java")) {
-                result.put("java", content);
-            } else if (name != null) {
-                result.put(name.trim(), content);
-            }
-        }
-        return result;
+    private String extractBetween(String text, String start, String end) {
+        if (text == null) return null;
+        int i = text.indexOf(start);
+        if (i < 0) return null;
+        int j = text.indexOf(end, i + start.length());
+        if (j < 0) return null;
+        return text.substring(i + start.length(), j).trim();
     }
 
     private static class ParsedInfo {
