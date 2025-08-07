@@ -82,7 +82,7 @@ public class YapayZekaKodlayici extends JavaPlugin {
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
         if (label.equalsIgnoreCase("yapayzeka") && args.length >= 2 && args[0].equalsIgnoreCase("kodla")) {
-            final String prompt = org.apache.commons.lang.StringUtils.join(Arrays.copyOfRange(args, 1, args.length), " ");
+            final String prompt = org.apache.commons.lang3.StringUtils.join(Arrays.copyOfRange(args, 1, args.length), " ");
             sender.sendMessage(prefix + "Açıklama AI’ye gönderiliyor: " + prompt);
 
             if (apiKey == null || apiKey.equals("null") || apiKey.length() < 10) {
