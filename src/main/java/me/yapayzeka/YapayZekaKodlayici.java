@@ -122,15 +122,6 @@ public class YapayZekaKodlayici extends JavaPlugin {
                             String aiContent = resp.getAsJsonArray("choices").get(0).getAsJsonObject()
                                     .getAsJsonObject("message").get("content").getAsString();
 
-                            String[] yasakliIfadeler = new String[]{"Runtime.getRuntime()", "ProcessBuilder", "System.exit", "File.delete", "Thread.sleep(", "while(true)", "for(;;)", "new URL(", "new Socket("};
-                            for (int i = 0; i < yasakliIfadeler.length; i++) {
-                                if (aiContent != null && aiContent.contains(yasakliIfadeler[i])) {
-                                    sender.sendMessage(prefix + "Â§cGÃ¼vensiz ifade tespit edildi: Â§e" + yasakliIfadeler[i]);
-                                    sender.sendMessage(prefix + "Â§cÄ°ÅŸlem iptal edildi.");
-                                    return;
-                                }
-                            }
-
                             String javaKodu = extractBetween(aiContent, "```java", "```");
                             String pluginYml = extractBetween(aiContent, "```yaml", "```");
 
